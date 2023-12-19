@@ -1,0 +1,778 @@
+---
+title: "sims"
+author: "Rich"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This file tries to simulate multi-level data for a range of factorial designs.
+
+## load the libraries that we will be using ## 
+
+## install ##
+
+```{r install-pkg}
+# install.packages("remotes")
+# remotes::install_github("stan-dev/cmdstanr")
+# 
+# install.packages("devtools")
+# devtools::install_github("jmgirard/standist")
+# 
+# install.packages(c("tidyverse", "RColorBrewer", "patchwork", "brms",
+#                    "tidybayes", "bayesplot", "future", "lme4", "faux",
+#                    "lmerTest", "broom.mixed"))
+```
+
+take a snapshot of loaded packages and update the lock.file using renv
+
+```{r snapshot-renv}
+# take a snapshot and update the lock.file
+# renv::snapshot() # this is only necessary when new packages or installed or packages are updated.
+```
+
+## load ##
+
+```{r load-pkg}
+pkg <- c("cmdstanr", "standist", "tidyverse", "RColorBrewer", "patchwork", 
+         "brms", "tidybayes", "bayesplot", "future", "parallel", "lme4", "faux",
+         "lmerTest", "broom.mixed")
+
+lapply(pkg, library, character.only = TRUE)
+```
+
+## settings ##
+
+```{r set-options}
+options(brms.backend = "cmdstanr",
+        mc.cores = parallel::detectCores(),
+        future.fork.enable = TRUE,
+        future.rng.onMisuse = "ignore") ## automatically set in RStudio
+
+supportsMulticore()
+
+detectCores()
+```
+
+## plot settings ##
+
+```{r}
+## Set the amount of dodge in figures
+pd <- position_dodge(0.7)
+pd2 <- position_dodge(1)
+```
+
+theme settings for ggplot
+
+```{r, eval = F}
+theme_set(
+  theme_bw() +
+    theme(text = element_text(size = 18), 
+          title = element_text(size = 18),
+          legend.position = "bottom")
+)
+```
+
+## section 1 - one between-subject condition, two groups ##
+
+## between-subject condition (treatment vs control group) ##
+
+basic design is treatment vs control group with a small difference in means
+and an SD of 1 for each group. It is also not a multi-level model, just to keep
+things simple to start.
+
+ok, let's keep it simple to start and just use the rnorm function in base R. We
+won't start using the {faux} package yet, although we could. It might be nice to
+see something in an even more elemental form.
+
+set some values e.g., the N per group
+
+```{r}
+# N per group
+n <- 50
+
+# define the means
+mu_c <- 0 # control group
+mu_t <- 0.5 # treatment group
+```
+
+generate the data 
+
+```{r}
+# make it reproducible
+set.seed(1)
+
+dat1 <-
+  tibble(group = rep(c("control", "treatment"), each = n)) %>% 
+  mutate(treatment = ifelse(group == "control", 0, 1),
+         y         = ifelse(group == "control", 
+                            rnorm(n, mean = mu_c, sd = 1),
+                            rnorm(n, mean = mu_t, sd = 1)))
+head(dat1)
+glimpse(dat1)
+
+# save initial data
+write_csv(dat1, "data/dat1.csv") # 
+```
+
+## plot ##
+
+density plot
+
+```{r}
+ggplot(dat1, aes(x=y, fill=group)) +
+   geom_density(alpha = 0.3, colour = "darkgrey") +
+   scale_fill_brewer(palette = "Dark2")+
+   ggtitle("treatment vs control group") 
+# ggsave ("figures/density.jpeg")
+```
+
+## build some models ##
+
+lme4 model
+
+```{r}
+m1 <- lm(y ~ 1 + group, data = dat1)
+
+summary(m1)
+tidy(m1)
+saveRDS(m1, file = "models/m1.rds")
+```
+
+create a function to generate data and fit a model repeatedly
+
+```{r}
+sim1 <- function(n = 50, 
+                 mu_c = 0,
+                 mu_t = 0.5,
+                ... # helps the function work with pmap() below
+                ) {
+
+  # set up data structure
+  data <-
+  tibble(group = rep(c("control", "treatment"), each = n)) %>% 
+  mutate(treatment = ifelse(group == "control", 0, 1),
+         y         = ifelse(group == "control", 
+                            rnorm(n, mean = mu_c, sd = 1),
+                            rnorm(n, mean = mu_t, sd = 1)))
+
+  # run mixed effect model and return relevant values
+  m <- lm(y ~ 1 + group, data = data)
+
+  broom.mixed::tidy(m)
+}
+```
+
+## now run the sim with many reps per variation ##
+
+the faux::crossing() function is useful to set up the structure
+
+```{r}
+plan(multicore)
+lmx1 <- crossing(
+  rep = 1:100, # number of replicates
+  n = c(25, 50, 75), # range of subject N c(25, 50, 75)
+  mu_t = c(0.25, 0.5, 0.75) # effect size of the treatment c(0.25, 0.50, 0.5)
+) %>%
+  mutate(analysis = pmap(., sim1)) %>%
+  unnest(analysis)
+```
+
+let's take a look
+
+```{r}
+head(lmx1)
+str(lmx1)
+```
+
+select fixed effects and create factors
+
+```{r}
+lmx1_params <- lmx1 %>% 
+  mutate(rep = factor(rep),
+         n = factor(n),
+         mu_t = factor(mu_t),
+         term = factor(term))
+head(lmx1_params)
+str(lmx1_params)
+```
+
+calculate average values
+
+```{r}
+lmx1_params_qi <- lmx1_params %>% 
+  group_by(n, mu_t, term) %>% 
+  median_qi(estimate)
+head(lmx1_params_qi)
+```
+
+and plot
+
+```{r}
+p_lm1_fixed <- ggplot(lmx1_params, aes(x = estimate, y = fct_rev(term), 
+                                       fill = term)) +  
+  geom_vline(xintercept = 0, color = "grey", alpha = 5/10) +
+  stat_halfeye() +
+  labs(title = "Avg. simulated coefficient plot for fixed effects (predictors)",
+       x = NULL, y = NULL) +
+  theme_bw() +
+  scale_fill_brewer(palette = "Dark2") +
+  theme(panel.grid   = element_blank(),
+        panel.grid.major.y = element_line(color = alpha("firebrick4", 1/2), linetype = 3),
+        axis.text.y  = element_text(hjust = 0),
+        axis.ticks.y = element_blank(),
+        legend.position = "none") +
+  # coord_cartesian(xlim =c(-1, 1)) +
+  # scale_x_continuous(breaks=seq(-1,1,0.2)) +
+  facet_grid(fct_rev(n)~mu_t)
+p_lm1_fixed
+
+ggsave ("figures/lm1_fixef.jpeg",
+        width = 5, height = 4)
+```
+
+calculate power i.e., % p < 0.05
+
+```{r}
+lm1_power <- lmx1_params %>% 
+  filter(term == "grouptreatment") %>%
+  group_by(n, mu_t) %>% # here we would group_by stuff that we varied in the sims
+  mutate(check = ifelse(p.value < 0.5, 1, 0)) %>% 
+  summarise(power = mean(check))
+lm1_power
+```
+
+plot power
+
+```{r}
+p_lm1_power <- ggplot(lm1_power, aes(x = mu_t, y = n, fill = power)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.3f", power)), color = "white", size = 10) +
+  scale_fill_viridis_c(limits = c(0, 1))
+p_lm1_power
+
+ggsave ("figures/lm1_power.jpeg")
+```
+
+plot parameters and include power as a text label
+
+wrangle
+
+```{r}
+lm1_plot_params <- lmx1_params %>%
+  filter(term == "grouptreatment") %>%
+  mutate(below_05 = if_else(p.value < 0.5, "yes", "no"), 
+         below_05 = factor(below_05, levels = c("no", "yes"))) %>% 
+  inner_join(lm1_power, by = c("n", "mu_t")) %>% 
+  mutate(power = round(power * 100, 2)) 
+head(lm1_plot_params)
+```
+
+plot
+
+```{r}
+p_lm1_params <- lm1_plot_params %>%
+  ggplot(aes(x = rep, y = estimate, ymin = estimate-std.error, 
+             ymax = estimate+std.error)) +
+  geom_pointrange(fatten = 1/2, aes(colour=below_05)) +
+  geom_hline(yintercept = 0, colour = "red") +
+  # geom_hline(aes(yintercept = 0.35), colour = "blue") + # this would add at the target effect size
+  scale_colour_manual(values=c("black", "darkgrey")) +
+  geom_text(aes(x=75, y=-0.80,
+                label = sprintf("%.1f%s", power, "% power")), 
+            color = "darkgrey", size = 4) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = "sim # (i.e., simulation index)",
+       y = expression(beta("treatment"))) +
+  scale_x_discrete(breaks = NULL) +
+  facet_grid(fct_rev(n)~mu_t)
+p_lm1_params
+
+ggsave ("figures/lm1_parameters.jpeg",
+        width = 6, height = 6)
+```
+
+save out some files
+
+```{r}
+write_csv(lmx1, "data/lmx1.csv")
+write_csv(lmx1_params, "data/lmx1_params.csv")
+write_csv(lmx1_params_qi, "data/lmx1_param_qi.csv")
+```
+
+
+
+## section 2 - one within-subject condition with two levels ##
+
+now we still have one condition, but it is within-subject, repeated measures. And
+we will add more trial repeats to make it more realistic and allow a multi-level
+model to be fit to the data.
+
+## generate the data ##
+
+set some values
+
+Note - I took most of these from a prior model and just rounded them, I also 
+only use 10 pts to make it small.
+
+```{r}
+subj_n = 10  # number of subjects
+rep_n = 10 # number of trial repeats 
+
+# set fixed effects
+b0 = 10    # intercept
+b1 = -0.5      # fixed effect of cue
+
+# set varying effects (by subject)
+u0s_sd = 1.50   # varying intercept SD 
+u1s_sd = 0.50   # varying b1 slope SD
+
+# set correlations between varying effects
+r01s = 0.1   # correlation between varying effects 0 and 1 
+
+# set sigma
+sigma_sd = 1 # error SD
+```
+
+set cor mat (in this case just one value)
+
+```{r}
+cors = r01s
+```
+
+setup the data structure (and now we switch to the {faux} package functions)
+
+```{r}
+# make it reproducible
+set.seed(2)
+
+# set up data structure
+dat2 <- add_random(subj = subj_n, rep = rep_n) %>%
+  # add and recode categorical variables
+  add_within("subj", cue = c("first_cue", "second_cue")) %>%
+  add_contrast("cue", "anova", add_cols = TRUE, colnames = "cued") %>%
+  # add random effects 
+  add_ranef("subj", u0s = u0s_sd, u1s = u1s_sd,
+            .cors = cors) %>% 
+  add_ranef(sigma = sigma_sd) %>%
+  # calculate DV
+  mutate(ms = b0 + u0s + (b1 + u1s) * cued + sigma)
+
+head(dat2)
+str(dat2)
+summary(dat2)
+
+# save initial data
+write_csv(dat2, "data/dat2.csv") # 
+```
+
+## plot ##
+
+density plot
+
+```{r}
+ggplot(dat2, aes(x=ms, fill=cue)) +
+   geom_density(alpha = 0.3, colour = "darkgrey") +
+   scale_fill_brewer(palette = "Dark2")+
+   ggtitle("ms by condition") 
+# ggsave ("figures/density.jpeg")
+```
+
+create some group average summary data
+
+per pid
+
+```{r}
+summary_pid2 <- dat2 %>% 
+  group_by(subj, cue) %>% 
+  summarise(mean = mean(ms),
+            sd = sd(ms),
+            n = length(unique(rep)), # n here is the total subjs
+            sem = (sd/sqrt(length(unique(rep)))),
+            ci = sem*1.96)
+summary_pid2
+```
+
+at the group level
+
+```{r}
+summary2 <- dat2 %>% 
+  group_by(cue) %>% 
+  summarise(mean = mean(ms),
+            sd = sd(ms),
+            n = length(unique(subj)), # n here is the total subjs
+            sem = (sd/sqrt(length(unique(subj)))),
+            ci = sem*1.96)
+summary2
+```
+
+violin
+
+```{r}
+ggplot(summary_pid2, aes(x=cue, y = mean, fill=cue, colour = cue)) +
+   geom_jitter(position=position_jitterdodge(dodge.width =1), 
+               alpha = 1, colour = "darkgrey") +
+   geom_violin(alpha = 0.7) +
+   geom_point(data = summary2, 
+             aes(y = mean), size = 3, position=pd2, colour="black") +
+   geom_errorbar(data = summary2,
+                aes(y = mean, ymin = mean-ci, ymax = mean +ci),
+                width=.2, position=pd2, colour = "black") +
+   scale_fill_brewer(palette = "Dark2") +
+   scale_colour_brewer(palette = "Dark2") +
+   ggtitle("mt by condition") 
+```
+
+## build some models ##
+
+lme4 model
+
+```{r}
+m2 <- lmer(ms ~ 1 + cued +
+               (1 + cued | subj),
+               data = dat2)
+summary(m2)
+tidy(m2)
+saveRDS(m2, file = "models/m2.rds")
+```
+
+at this point, you could create a new sim function (sim2) and run through the 
+steps that were completed above, but I'll skip that for now, as the steps are
+the same, it is just the data and model that are different.
+
+## now fit a brms model ##
+
+This is just if you want to fit a Bayesian equivalent of the above lme4 model.
+
+There is no need in some ways, as lme4 can do the job up to a point. But once you 
+get to more complicated models (with more varying / random effects), lme4 will 
+crap out and you'll have to find alternative solutions, one of which is to fit 
+Bayesian models, as they can handle more complex datasets. See these posts for details:
+
+https://rdrr.io/cran/lme4/man/isSingular.html
+
+https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#singular-models-random-effect-variances-estimated-as-zero-or-correlations-estimated-as---1
+
+And see my blog post for the benefits of Bayesian estimation approaches more 
+generally and why my lab uses them over frequentist / lme4 approaches:
+
+https://rich-ramsey.com/posts/2023-07-14_data_analysis_workflow/
+
+
+Note - if you've never setup your computer to run a brms model (which uses STAN
+on the backend, then you'll need to setup your machine for this. I can send you
+some code to walk you through it.)
+
+## formula ##
+
+```{r}
+formula = bf(ms ~ 1 + cued +
+               (1 + cued | subj))
+```
+
+## check the priors available ##
+
+```{r}
+get_prior(formula,
+          data = dat2, family = gaussian())
+```
+
+## visualise priors ##
+
+here we would normally visualise priors of interest to make a judgment about what
+would constitute weakly informative priors. 
+
+https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
+
+
+a quick look at the density plots from the wrangle script shows a range from 5-15 
+with 10 as the approximate centre. So let's plot some distributions.
+
+```{r}
+visualize("normal(10, 1)", "normal(10, 2)", "normal(10, 3)", "normal(10, 4)",
+          xlim = c(5, 15))
+```
+
+(10, 2) seems reasonable for the intercept
+
+
+and then for the effect of interest (b)
+
+for the effects, let's do our usual, centre on zero and plot a range of SDs.
+
+The logic of choosing zero as a centre point is to say in advance, we expect effects
+to be more often closer to zero than far away from zero. e.g., if the mean is 10
+then we would expect an effect of 0.1, 0.5 or 1 to be more likely than 20, given
+what we know about movement speed changes in tasks like these. Also picking zero 
+means that our priors are even with regard to positive or negative effects of 
+conditions. 
+
+```{r}
+visualize("normal(0, 0.25)", "normal(0, 0.5)", "normal(0, 1)",
+          xlim = c(-2, 2))
+```
+
+(0, 0.5) seems fine. effects >1.5ms seem unlikely. Note - this doesn't rule them 
+out, it just makes them less plausible in advance. 
+
+For the remaining SD, sigma and cor priors, we'll go with what we often use.
+
+## set priors ##
+
+same priors as the previous model
+
+```{r}
+priors <- c(
+  set_prior("normal(10, 2)", class = "Intercept"),
+  set_prior("normal(0, 0.5)", class = "b"),
+  set_prior("normal(0, 1)", class = "sd"),
+  set_prior("normal(0, 1)", class = "sigma"),
+  set_prior("lkj(2)", class = "cor")
+)
+```
+
+## fit the model ##
+
+```{r}
+plan(multicore)
+b2 <- brm(formula = formula,
+        data = dat2, family = gaussian(),
+        prior = priors,
+        iter = 2000, warmup = 1000, cores = 8, chains = 4,
+        save_pars = save_pars(all=TRUE),
+        seed = 123,
+        file = "models/b2")
+summary(b2)
+```
+
+and at this point, you could do something similar to dat1/sim1, but instead of
+using lme4 in a sim function, you'd build a Bayesian model 100/1000 times and then
+summarise the key parameter estimates.
+
+
+
+## section 3 - 2x2 factorial design ##
+
+two within-subject factors, each with two levels. 
+
+I am using a 2 (bin/cue: 1 and 2) * 2(condition: neutral and reward) design. So, 
+at each time point (1 and 2), there are neutral and reward conditions. But only 
+at time 2 is the reward cue presented. Hence, we predict an interaction, which 
+we will bake into the data.
+
+## generate the data ##
+
+set some values
+
+I took most of these from a prior and just rounded them, I also only use 10 pts to
+make it small.
+
+e.g.,
+
+```{r}
+# bffn23 <- readRDS("models/template/bffn23.rds")
+# summary(bffn23)
+```
+
+set some values 
+
+```{r}
+subj_n = 10  # number of subjects
+rep_n = 10 # number of trial repeats 
+
+# set fixed effects
+b0 = 10    # intercept
+b1 = -0.5      # fixed effect of cue
+b2 = 0.15      # fixed effect of condition
+b12i = 0.40    # interaction between cue and bin
+
+# set varying effects (by subject)
+u0s_sd = 1.50   # varying intercept SD 
+u1s_sd = 0.50   # varying b1 slope SD
+u2s_sd = 0.30   # varying b2 slope SD
+
+ui12s_sd = 0.30   # varying b1*b2 slope SD
+
+# set correlations between varying effects
+r01s = 0.10   # correlation between varying effects 0 and 1
+r02s = -0.30   # correlation between varying effects 0 and 2 
+r12s = -0.05  # correlation between varying effects 1 and 2 
+
+# and now cors between mean effects and the cue*condition interaction 
+r0i12s = 0.05   # correlation between intercept and  
+r1i12s = 0.40   # correlation between b1 and the interaction 
+r2i12s = -0.05  # correlation between b2 and the interaction
+
+# set sigma
+sigma_sd = 1 # error SD
+```
+
+set the correlation matrix
+
+```{r}
+cors = c(r01s, r02s, r0i12s, 
+         r12s, r1i12s,
+         r2i12s)
+```
+
+setup the data structure
+
+```{r}
+# make it reproducible
+set.seed(3)
+
+# set up data structure
+dat3 <- add_random(subj = subj_n, rep = rep_n) %>%
+  # add and recode categorical variables
+  add_within("subj", cue = c("first_cue", "second_cue")) %>%
+  add_contrast("cue", "anova", add_cols = TRUE, colnames = "cued") %>%
+  add_within("subj", condition = c("neutral", "reward")) %>%
+  add_contrast("condition", "anova", add_cols = TRUE, colnames = "cond") %>%
+  # add random effects 
+  add_ranef("subj", u0s = u0s_sd, u1s = u1s_sd, u2s = u2s_sd, ui12s = ui12s_sd,
+            .cors = cors) %>% 
+  add_ranef(sigma = sigma_sd) %>%
+  # calculate DV
+  mutate(ms = b0 + u0s + (b1 + u1s) * cued + 
+                         (b2 + u2s) * cond + 
+                         ((b12i + ui12s) * cued * cond) +
+                         sigma)
+
+head(dat3)
+str(dat3)
+summary(dat3)
+
+# save initial data
+write_csv(dat3, "data/dat3.csv") # 
+```
+
+## plot ##
+
+density plot
+
+```{r}
+ggplot(dat3, aes(x=ms, fill=condition)) +
+   geom_density(alpha = 0.3, colour = "darkgrey") +
+   scale_fill_brewer(palette = "Dark2")+
+   ggtitle("ms by condition") +
+   facet_wrap(~cue)
+# ggsave ("figures/density.jpeg")
+```
+
+create some group average summary data
+
+per pid
+
+```{r}
+summary_pid3 <- dat3 %>% 
+  group_by(subj, cue, condition) %>% 
+  summarise(mean = mean(ms),
+            sd = sd(ms),
+            n = length(unique(rep)), # n here is the total subjs
+            sem = (sd/sqrt(length(unique(rep)))),
+            ci = sem*1.96)
+summary_pid3
+```
+
+at the group level
+
+```{r}
+summary3 <- dat3 %>% 
+  group_by(cue, condition) %>% 
+  summarise(mean = mean(ms),
+            sd = sd(ms),
+            n = length(unique(subj)), # n here is the total subjs
+            sem = (sd/sqrt(length(unique(subj)))),
+            ci = sem*1.96)
+summary3
+```
+
+violin
+
+```{r}
+ggplot(summary_pid3, aes(x=condition, y = mean, 
+                         fill=condition, colour = condition)) +
+   geom_jitter(position=position_jitterdodge(dodge.width =1), 
+               alpha = 1, colour = "darkgrey") +
+   geom_violin(alpha = 0.7) +
+   geom_point(data = summary3, 
+             aes(y = mean), size = 3, position=pd2, colour="black") +
+   geom_errorbar(data = summary3,
+                aes(y = mean, ymin = mean-ci, ymax = mean +ci),
+                width=.2, position=pd2, colour = "black") +
+   scale_fill_brewer(palette = "Dark2") +
+   scale_colour_brewer(palette = "Dark2") +
+   ggtitle("mt by condition") +
+   facet_wrap(~cue)
+```
+
+## build some models ##
+
+lme4 model
+
+```{r}
+m3 <- lmer(ms ~ 1 + cued * cond +
+               (1 + cued * cond | subj),
+               data = dat3)
+summary(m3)
+tidy(m3)
+saveRDS(m3, file = "models/m3.rds")
+```
+
+we already have a singularity issue, as I flagged above. e.g., this warning occurs:
+
+boundary (singular) fit: see help('isSingular')
+
+So a brms model would be useful here.
+
+## now fit a brms model ##
+
+## formula ##
+
+```{r}
+formula = bf(ms ~ 1 + cued * cond +
+               (1 + cued * cond | subj))
+```
+
+## check the priors available ##
+
+```{r}
+get_prior(formula,
+          data = dat3, family = gaussian())
+```
+
+## set priors ##
+
+same priors as the previous model
+
+```{r}
+priors <- c(
+  set_prior("normal(10, 2)", class = "Intercept"),
+  set_prior("normal(0, 0.5)", class = "b"),
+  set_prior("normal(0, 1)", class = "sd"),
+  set_prior("normal(0, 1)", class = "sigma"),
+  set_prior("lkj(2)", class = "cor")
+)
+```
+
+## fit the model ##
+
+```{r}
+plan(multicore)
+b3 <- brm(formula = formula,
+        data = dat3, family = gaussian(),
+        prior = priors,
+        iter = 2000, warmup = 1000, cores = 8, chains = 4,
+        save_pars = save_pars(all=TRUE),
+        seed = 123,
+        file = "models/b3")
+summary(b3)
+```
+
+ok, no problems with that.
