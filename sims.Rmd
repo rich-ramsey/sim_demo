@@ -466,8 +466,8 @@ https://rich-ramsey.com/posts/2023-07-14_data_analysis_workflow/
 
 
 Note - if you've never setup your computer to run a brms model (which uses STAN
-on the backend, then you'll need to setup your machine for this. I can send you
-some code to walk you through it.)
+on the backend), then you'll need to setup your machine for this. I can send you
+some code to walk you through it.
 
 ## formula ##
 
@@ -776,3 +776,212 @@ summary(b3)
 ```
 
 ok, no problems with that.
+
+
+## create a function to generate data and fit a model repeatedly ##
+
+## let's first try with lme4 ##
+
+I know this model has a singularity issue, but let's try anyway, just to get a
+sense of what it would look like.
+
+```{r}
+sim1 <- function(n = 50, 
+                 mu_c = 0,
+                 mu_t = 0.5,
+                ... # helps the function work with pmap() below
+                ) {
+
+  # set up data structure
+  data <-
+  tibble(group = rep(c("control", "treatment"), each = n)) %>% 
+  mutate(treatment = ifelse(group == "control", 0, 1),
+         y         = ifelse(group == "control", 
+                            rnorm(n, mean = mu_c, sd = 1),
+                            rnorm(n, mean = mu_t, sd = 1)))
+
+  # run mixed effect model and return relevant values
+  m <- lmer(ms ~ 1 + cued * cond +
+               (1 + cued * cond | subj),
+               data = data)
+
+  broom.mixed::tidy(m)
+}
+```
+
+```{r}
+sim3 <- function(subj_n = 10, rep_n = 10,  # these can be changed when calling the function
+                b0 = 10, b1 = -0.5,  b2 = 0.15, b12i = 0.4,       # fixed effects 
+                u0s_sd = 1.50, u1s_sd = 0.50, u2s_sd = 0.30, ui12s_sd = 0.30,   # varying effects
+                cors = c(0.10, -0.30, -0.05,
+                         0.05, 0.40,
+                         -0.05),   # cor
+                sigma_sd = 1,      # error term
+                ... # helps the function work with pmap() below
+                ) {
+
+  # set up data structure
+  data <- add_random(subj = subj_n, rep = rep_n) %>%
+  # add and recode categorical variables
+  add_within("subj", cue = c("first_cue", "second_cue")) %>%
+  add_contrast("cue", "anova", add_cols = TRUE, colnames = "cued") %>%
+  add_within("subj", condition = c("neutral", "reward")) %>%
+  add_contrast("condition", "anova", add_cols = TRUE, colnames = "cond") %>%
+  # add random effects 
+  add_ranef("subj", u0s = u0s_sd, u1s = u1s_sd, u2s = u2s_sd, ui12s = ui12s_sd,
+            .cors = cors) %>% 
+  add_ranef(sigma = sigma_sd) %>%
+  # calculate DV
+  mutate(ms = b0 + u0s + (b1 + u1s) * cued + 
+                         (b2 + u2s) * cond + 
+                         ((b12i + ui12s) * cued * cond) +
+                         sigma)
+
+  # run mixed effect model and return relevant values
+  m <- lmer(ms ~ 1 + cued * cond +
+               (1 + cued * cond | subj),
+               data = data)
+
+  broom.mixed::tidy(m)
+}
+```
+
+## now run the sim with many reps per variation ##
+
+the faux::crossing() function is useful to set up the structure
+
+```{r}
+plan(multicore)
+lmx3 <- crossing(
+  repx = 1:100, # number of replicates. changed to repx (rep experiment) to avoid confusion trial rep
+  subj_n = c(25, 50, 75), # range of subject N c(25, 50, 75)
+  b12i = c(0.2, 0.4, 0.6) # effect size of the treatment c(0.25, 0.50, 0.5)
+) %>%
+  mutate(analysis = pmap(., sim3)) %>%
+  unnest(analysis)
+```
+
+let's take a look
+
+```{r}
+head(lmx3)
+str(lmx3)
+```
+
+select fixed effects and create factors
+
+```{r}
+lmx3_params <- lmx3 %>%
+  filter(effect == "fixed") %>% 
+  mutate(repx = factor(repx),
+         subj_n = factor(subj_n),
+         b12i = factor(b12i),
+         term = factor(term, 
+                       levels = c("(Intercept)", "cued", "cond", "cued:cond")))
+head(lmx3_params)
+str(lmx3_params)
+```
+
+calculate average values
+
+```{r}
+lmx3_params_qi <- lmx3_params %>% 
+  group_by(subj_n, b12i, term) %>% 
+  median_qi(estimate)
+head(lmx3_params_qi)
+```
+
+and plot
+
+```{r}
+p_lm3_fixed <- ggplot(lmx3_params, aes(x = estimate, y = fct_rev(term), 
+                                       fill = term)) +  
+  geom_vline(xintercept = 0, color = "grey", alpha = 5/10) +
+  stat_halfeye() +
+  labs(title = "Avg. simulated coefficient plot for fixed effects (predictors)",
+       x = NULL, y = NULL) +
+  theme_bw() +
+  scale_fill_brewer(palette = "Dark2") +
+  theme(panel.grid   = element_blank(),
+        panel.grid.major.y = element_line(color = alpha("firebrick4", 1/2), linetype = 3),
+        axis.text.y  = element_text(hjust = 0),
+        axis.ticks.y = element_blank(),
+        legend.position = "none") +
+  coord_cartesian(xlim =c(-1, 1)) +
+  scale_x_continuous(breaks=seq(-1,1,0.2)) +
+  facet_grid(fct_rev(subj_n)~b12i)
+p_lm3_fixed
+
+ggsave ("figures/lm3_fixef.jpeg",
+        width = 5, height = 4)
+```
+
+calculate power i.e., % p < 0.05
+
+```{r}
+lm3_power <- lmx3_params %>% 
+  filter(term == "cued:cond") %>%
+  group_by(subj_n, b12i) %>% # here we would group_by stuff that we varied in the sims
+  mutate(check = ifelse(p.value < 0.5, 1, 0)) %>% 
+  summarise(power = mean(check))
+lm3_power
+```
+
+plot power
+
+```{r}
+p_lm3_power <- ggplot(lm3_power, aes(x = b12i, y = subj_n, fill = power)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.3f", power)), color = "white", size = 10) +
+  scale_fill_viridis_c(limits = c(0, 1))
+p_lm3_power
+
+ggsave ("figures/lm3_power.jpeg")
+```
+
+plot parameters and include power as a text label
+
+wrangle
+
+```{r}
+lm3_plot_params <- lmx3_params %>%
+  filter(term == "cued:cond") %>%
+  mutate(below_05 = if_else(p.value < 0.5, "yes", "no"), 
+         below_05 = factor(below_05, levels = c("no", "yes"))) %>% 
+  inner_join(lm3_power, by = c("subj_n", "b12i")) %>% 
+  mutate(power = round(power * 100, 2)) 
+head(lm3_plot_params)
+```
+
+plot
+
+```{r}
+p_lm3_params <- lm3_plot_params %>%
+  ggplot(aes(x = repx, y = estimate, ymin = estimate-std.error, 
+             ymax = estimate+std.error)) +
+  geom_pointrange(fatten = 1/2, aes(colour=below_05)) +
+  geom_hline(yintercept = 0, colour = "red") +
+  # geom_hline(aes(yintercept = 0.35), colour = "blue") + # this would add at the target effect size
+  scale_colour_manual(values=c("black", "darkgrey")) +
+  geom_text(aes(x=75, y=-0.50,
+                label = sprintf("%.1f%s", power, "% power")), 
+            color = "darkgrey", size = 4) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = "sim # (i.e., simulation index)",
+       y = expression(beta("treatment"))) +
+  scale_x_discrete(breaks = NULL) +
+  facet_grid(fct_rev(subj_n)~b12i)
+p_lm3_params
+
+ggsave ("figures/lm3_parameters.jpeg",
+        width = 6, height = 6)
+```
+
+save out some files
+
+```{r}
+write_csv(lmx3, "data/lmx3.csv")
+write_csv(lmx3_params, "data/lmx3_params.csv")
+write_csv(lmx3_params_qi, "data/lmx3_param_qi.csv")
+```
