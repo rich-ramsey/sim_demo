@@ -786,30 +786,6 @@ I know this model has a singularity issue, but let's try anyway, just to get a
 sense of what it would look like.
 
 ```{r}
-sim1 <- function(n = 50, 
-                 mu_c = 0,
-                 mu_t = 0.5,
-                ... # helps the function work with pmap() below
-                ) {
-
-  # set up data structure
-  data <-
-  tibble(group = rep(c("control", "treatment"), each = n)) %>% 
-  mutate(treatment = ifelse(group == "control", 0, 1),
-         y         = ifelse(group == "control", 
-                            rnorm(n, mean = mu_c, sd = 1),
-                            rnorm(n, mean = mu_t, sd = 1)))
-
-  # run mixed effect model and return relevant values
-  m <- lmer(ms ~ 1 + cued * cond +
-               (1 + cued * cond | subj),
-               data = data)
-
-  broom.mixed::tidy(m)
-}
-```
-
-```{r}
 sim3 <- function(subj_n = 10, rep_n = 10,  # these can be changed when calling the function
                 b0 = 10, b1 = -0.5,  b2 = 0.15, b12i = 0.4,       # fixed effects 
                 u0s_sd = 1.50, u1s_sd = 0.50, u2s_sd = 0.30, ui12s_sd = 0.30,   # varying effects
