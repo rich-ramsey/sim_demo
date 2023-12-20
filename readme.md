@@ -1,4 +1,6 @@
-## Readme ##
+Readme
+
+## Background and aims ##
 
 This project simulates multi-level data for a range of factorial designs. It is
 designed to give a quick insight into how you might go about determining sample
@@ -10,6 +12,7 @@ Most of the content is inspired by two people:
 
 2) Solomon Kurz and his Bayesian "power" blog post: 
 https://solomonkurz.netlify.app/blog/bayesian-power-analysis-part-i/
+
 
 ## Contents ##
 
