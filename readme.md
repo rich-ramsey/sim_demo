@@ -31,7 +31,7 @@ effect sizes.
 3) /renv/ folder and renv.lock file
 
 This folder and file are used with the package management software renv(). Once
-you download the project locally, renv() shoudl automatically kick-in and make
+you download the project locally, renv() should automatically kick-in and make
 things happen with appropriate package versions.
 
 
