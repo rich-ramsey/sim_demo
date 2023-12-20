@@ -30,13 +30,17 @@ effect sizes.
 This is the renv() renv.lock file that can be used with the package management 
 software renv().
 
+
 ## Before you start ##
 
 Create three folders in the base directory:
 
-/data/
-/figures/
-/models/
+**/data/**
+
+**/figures/**
+
+**/models/**
+
 
 ## To get started ##
 
