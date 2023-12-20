@@ -28,10 +28,11 @@ that increase in complexity. It also shows how you can fit regression models usi
 lme4 or brms and calculate "power" for a range of target sample sizes and 
 effect sizes. 
 
-3) renv.lock
+3) /renv/ folder and renv.lock file
 
-This is the renv() renv.lock file that can be used with the package management 
-software renv().
+This folder and file are used with the package management software renv(). Once
+you download the project locally, renv() shoudl automatically kick-in and make
+things happen with appropriate package versions.
 
 
 ## Before you start ##
