@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This file tries to simulate multi-level data for a range of factorial designs.
+This file simulates multi-level data for a range of factorial designs.
 
 Most of the below is based on two sources:
 
@@ -90,7 +90,8 @@ theme_set(
 
 basic design is treatment vs control group with a small difference in means
 and an SD of 1 for each group. It is also not a multi-level model, just to keep
-things simple to start.
+things simple to start. This is taken from Solomon's blog post: 
+https://solomonkurz.netlify.app/blog/bayesian-power-analysis-part-i/
 
 ok, let's keep it simple to start and just use the rnorm function in base R. We
 won't start using the {faux} package yet, although we could. It might be nice to
@@ -176,7 +177,8 @@ sim1 <- function(n = 50,
 
 ## now run the sim with many reps per variation ##
 
-the faux::crossing() function is useful to set up the structure
+the faux::crossing() function is useful to set up the structure. I only simulate
+100 exps here (to save time), but for the real deal you'd want more like 1000.
 
 ```{r}
 plan(multicore)
@@ -830,7 +832,8 @@ sim3 <- function(subj_n = 10, rep_n = 10,  # these can be changed when calling t
 
 ## now run the sim with many reps per variation ##
 
-the faux::crossing() function is useful to set up the structure
+the faux::crossing() function is useful to set up the structure. Again, I only simulate
+100 exps here (to save time), but for the real deal you'd want more like 1000.
 
 ```{r}
 plan(multicore)
