@@ -907,7 +907,7 @@ calculate power i.e., % p < 0.05
 lm3_power <- lmx3_params %>% 
   filter(term == "cued:cond") %>%
   group_by(subj_n, b12i) %>% # here we would group_by stuff that we varied in the sims
-  mutate(check = ifelse(p.value < 0.5, 1, 0)) %>% 
+  mutate(check = ifelse(p.value < 0.05, 1, 0)) %>% 
   summarise(power = mean(check))
 lm3_power
 ```
@@ -931,7 +931,7 @@ wrangle
 ```{r}
 lm3_plot_params <- lmx3_params %>%
   filter(term == "cued:cond") %>%
-  mutate(below_05 = if_else(p.value < 0.5, "yes", "no"), 
+  mutate(below_05 = if_else(p.value < 0.05, "yes", "no"), 
          below_05 = factor(below_05, levels = c("no", "yes"))) %>% 
   inner_join(lm3_power, by = c("subj_n", "b12i")) %>% 
   mutate(power = round(power * 100, 2)) 
