@@ -250,7 +250,7 @@ calculate power i.e., % p < 0.05
 lm1_power <- lmx1_params %>% 
   filter(term == "grouptreatment") %>%
   group_by(n, mu_t) %>% # here we would group_by stuff that we varied in the sims
-  mutate(check = ifelse(p.value < 0.5, 1, 0)) %>% 
+  mutate(check = ifelse(p.value < 0.05, 1, 0)) %>% 
   summarise(power = mean(check))
 lm1_power
 ```
@@ -274,7 +274,7 @@ wrangle
 ```{r}
 lm1_plot_params <- lmx1_params %>%
   filter(term == "grouptreatment") %>%
-  mutate(below_05 = if_else(p.value < 0.5, "yes", "no"), 
+  mutate(below_05 = if_else(p.value < 0.05, "yes", "no"), 
          below_05 = factor(below_05, levels = c("no", "yes"))) %>% 
   inner_join(lm1_power, by = c("n", "mu_t")) %>% 
   mutate(power = round(power * 100, 2)) 
