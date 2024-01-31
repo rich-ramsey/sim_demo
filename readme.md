@@ -1,5 +1,3 @@
-Readme
-
 ## Background and aims ##
 
 This project simulates multi-level data for a range of factorial designs. It is
