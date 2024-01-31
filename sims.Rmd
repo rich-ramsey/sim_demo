@@ -475,7 +475,8 @@ https://rich-ramsey.com/posts/2023-07-14_data_analysis_workflow/
 
 Note - if you've never setup your computer to run a brms model (which uses STAN
 on the backend), then you'll need to setup your machine for this. I can send you
-some code to walk you through it.
+some code to walk you through it, such as this here:
+https://github.com/rich-ramsey/cmdstanr_setup
 
 ## formula ##
 
